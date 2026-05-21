@@ -214,6 +214,24 @@ sound even when the path was imperfect. The Blueprint files
 (`blueprint/initial.md`, `blueprint/guidelines.md`, `blueprint/catalog.md`)
 exist precisely to give that path a steady hand on subsequent runs.
 
+### Another test — Postman
+
+The same `/investigate` endpoint, exercised from Postman as a sanity
+check that the service is callable from any HTTP client, not just
+`curl` from the host. Same payload, same model, same triage loop —
+just a different client.
+
+![Postman investigation against /investigate](./screenshots/postman-investigate.png)
+
+`POST http://localhost:8088/investigate` with body
+`{"question":"anything unusual in the last 15 minutes?"}` →
+**200 OK, 7.71s, 38.39 KB response.** The answer enumerates the
+warning logs by code (`insufficient_stock` 86, `not_found` 60),
+calls out the steady checkout rate (~0.42/min), and lands on the
+implication that users are abandoning carts at checkout — exactly
+the kind of cross-signal insight the catalog's funnel section is
+designed to support.
+
 ---
 
 ## Manual fixes / gotchas worth flagging
