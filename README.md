@@ -1,13 +1,13 @@
-# eCommerce SRE Assignment — Observability + LLM Investigator
+# eCommerce SRE Assignment - Observability + LLM Investigator
 
 A small eCommerce app (Node + Express + React + MySQL) wrapped in a
 foundation layer that lets an LLM investigate a running system through
 real tool calls: Prometheus for metrics, Elasticsearch for logs, Grafana
 for humans, and a tool-calling AI service that ties them together.
 
-The application is the substrate. The signal is the *Blueprint* —
+The application is the substrate. The signal is the *Blueprint* -
 `blueprint/initial.md`, `blueprint/guidelines.md`, `blueprint/catalog.md`
-— which is what makes any of this reproducible by a different agent on
+- which is what makes any of this reproducible by a different agent on
 a fresh copy.
 
 ---
@@ -63,7 +63,7 @@ PAYMENT_FAILURE_RATE=0.6 docker compose up -d backend
 # Wait ~30s, then either look at Grafana → "Shop · User Journey"
 # (Payment success rate stat) or ask the AI service:
 docker compose exec ai-service npm run --silent cli -- \
-  "payments are failing — what's going on?"
+  "payments are failing - what's going on?"
 ```
 
 To restore:
@@ -77,7 +77,7 @@ PAYMENT_FAILURE_RATE=0.08 docker compose up -d backend
 ## Dashboard walkthrough
 
 There are exactly two dashboards. They're provisioned from
-`observability/grafana/dashboards/*.json` — no clickops. Both are
+`observability/grafana/dashboards/*.json` - no clickops. Both are
 intentionally narrow; if a panel doesn't answer a real on-call question,
 it's not there.
 
@@ -85,21 +85,21 @@ it's not there.
 
 Reads the funnel top-to-bottom:
 
-- **Journey rates (per minute)** — one line per stage of
+- **Journey rates (per minute)** - one line per stage of
   signup → login → cart add → checkout → payment success. If any line
   drops while the line above stays flat, that step is leaking. Read
   slopes, not absolute values.
-- **Payment success rate (5m)** — a single stat panel. Green ≥ 95%,
+- **Payment success rate (5m)** - a single stat panel. Green ≥ 95%,
   red < 90%. The first place on-call looks during a payment scare.
-- **Insufficient stock (5m)** — leading indicator of demand spikes or
+- **Insufficient stock (5m)** - leading indicator of demand spikes or
   stale stock numbers, before customer complaints arrive.
-- **Payment provider latency** — `payment_duration_seconds` p50 / p95 /
+- **Payment provider latency** - `payment_duration_seconds` p50 / p95 /
   p99. **This is the "us vs them" panel**: if p95 climbs here while
   `/api/payment`'s HTTP p95 (in System Health) climbs by the same
   amount, it's the provider, not our code.
-- **Payment outcomes (5m)** — pie chart by `result` + `decline_reason`.
+- **Payment outcomes (5m)** - pie chart by `result` + `decline_reason`.
   Tells you what kind of decline is dominating.
-- **Checkout outcomes (per minute)** — `checkouts_created_total` split
+- **Checkout outcomes (per minute)** - `checkouts_created_total` split
   by `result`. Rising `insufficient_stock` here pairs with the stock
   stat above.
 
@@ -107,17 +107,17 @@ Reads the funnel top-to-bottom:
 
 Stock SRE dashboard:
 
-- **HTTP RPS by route** — traffic shape; the first place to look for
+- **HTTP RPS by route** - traffic shape; the first place to look for
   shape changes.
-- **HTTP p95 latency by route** — cross-reference with RPS.
-- **Error rate by route (4xx + 5xx)** — per-route bad-response ratio.
-- **Top error codes (5m)** — closed-enum `error_code` ranked; each one
+- **HTTP p95 latency by route** - cross-reference with RPS.
+- **Error rate by route (4xx + 5xx)** - per-route bad-response ratio.
+- **Top error codes (5m)** - closed-enum `error_code` ranked; each one
   has an entry in `blueprint/catalog.md`.
-- **DB query p95 by named query** — `products_related` (the slow
+- **DB query p95 by named query** - `products_related` (the slow
   self-join) and `products_search` (the unindexed `LIKE`) are the two
   that degrade with row count.
-- **Process: event loop lag + RSS** — process-level health.
-- **Recent backend errors (Elasticsearch)** — log panel scoped to
+- **Process: event loop lag + RSS** - process-level health.
+- **Recent backend errors (Elasticsearch)** - log panel scoped to
   `service.name:backend AND level:(warn OR error)`. The pivot point
   between a Prom spike and the actual log lines.
 
@@ -126,15 +126,15 @@ Stock SRE dashboard:
 ## Sample AI investigation (real transcript)
 
 > **Captured live with `PAYMENT_FAILURE_RATE=0.5` for ~5 minutes against
-> the running stack. Model: `gpt-4o-mini`. Verbatim — not edited.**
+> the running stack. Model: `gpt-4o-mini`. Verbatim - not edited.**
 
 ```bash
 curl -s -X POST localhost:8088/investigate -H 'content-type: application/json' \
-  -d '{"question":"payments are failing more than usual right now — what is going on and is it our fault?"}'
+  -d '{"question":"payments are failing more than usual right now - what is going on and is it our fault?"}'
 ```
 
 ```
-— Investigation transcript (3 tool calls) —
+- Investigation transcript (3 tool calls) -
 
   → query_prometheus_range({
       "query":"rate(payment_attempts_total[5m])",
@@ -152,7 +152,7 @@ curl -s -X POST localhost:8088/investigate -H 'content-type: application/json' \
   → count_logs_by({ "field":"decline_reason", "query":"result:\"failed\"", "lookback_minutes":15 })
     ↳ buckets: []         ← `result` is a metric label, not a log field
 
-— Insight —
+- Insight -
 
 Payments are failing more than usual, with the failure rates driven
 primarily by two decline reasons: "do_not_honor" (p95 failure rate
@@ -166,18 +166,18 @@ In summary, the spike in payment failures is due to external factors
 (payment provider issues), not internal service faults.
 ```
 
-### What the AI got right — and where it stopped
+### What the AI got right - and where it stopped
 
 This is exactly the kind of trace the rubric wants me to be honest about.
 
 **Right:**
-- Picked the right first metric — `rate(payment_attempts_total[5m])`
+- Picked the right first metric - `rate(payment_attempts_total[5m])`
   split implicitly by labels. That single query revealed all three
   trajectories: success rate dropping, both decline reasons climbing
   together at the end of the window.
 - Reached a defensible conclusion (provider-side, not us). Distinguishing
   "us vs them" is the right framing per the guidelines.
-- Stopped on its own — finish reason `stop`, not iteration cap.
+- Stopped on its own - finish reason `stop`, not iteration cap.
 
 **Wrong / weak:**
 1. **Imagined event name.** Searched `event:"payment.failed"`. The
@@ -185,9 +185,9 @@ This is exactly the kind of trace the rubric wants me to be honest about.
    returned zero buckets because of this. The LLM had the catalog
    summary in its system prompt; it didn't read carefully enough. The
    guideline recommends calling `get_metric_catalog` or
-   `list_metric_names` first when unsure — it should have, and didn't.
+   `list_metric_names` first when unsure - it should have, and didn't.
 2. **Mislabeled the rate as a percentile.** "p95 failure rate of 0.072"
-   is meaningless — that number is a per-second counter rate, not any
+   is meaningless - that number is a per-second counter rate, not any
    percentile. Word salad that a senior reader would catch immediately.
 3. **Didn't check `payment_duration_seconds`.** The "is it us or them"
    conclusion would have been much stronger with the latency histogram
@@ -202,23 +202,23 @@ These four are the gap. Two could be closed by tightening the system
 prompt (add: "always quote the baseline from the catalog when reporting
 a value"; add: "before searching logs, look up the event name in
 `get_metric_catalog`"). The other two are model limitations at this
-size — `gpt-4o-mini` is fine for getting the shape of the answer, but a
+size - `gpt-4o-mini` is fine for getting the shape of the answer, but a
 larger model (or a stricter system prompt that demands a latency
 cross-check before concluding "not us") would be needed for a stronger
 result.
 
 The point isn't that the AI is perfect. The point is that the
-investigation **is real** — three actual tool calls against
+investigation **is real** - three actual tool calls against
 Prometheus and Elasticsearch, transcript captured live, conclusion
 sound even when the path was imperfect. The Blueprint files
 (`blueprint/initial.md`, `blueprint/guidelines.md`, `blueprint/catalog.md`)
 exist precisely to give that path a steady hand on subsequent runs.
 
-### Another test — Postman
+### Another test - Postman
 
 The same `/investigate` endpoint, exercised from Postman as a sanity
 check that the service is callable from any HTTP client, not just
-`curl` from the host. Same payload, same model, same triage loop —
+`curl` from the host. Same payload, same model, same triage loop -
 just a different client.
 
 ![Postman investigation against /investigate](./screenshots/postman-investigate.png)
@@ -228,7 +228,7 @@ just a different client.
 **200 OK, 7.71s, 38.39 KB response.** The answer enumerates the
 warning logs by code (`insufficient_stock` 86, `not_found` 60),
 calls out the steady checkout rate (~0.42/min), and lands on the
-implication that users are abandoning carts at checkout — exactly
+implication that users are abandoning carts at checkout - exactly
 the kind of cross-signal insight the catalog's funnel section is
 designed to support.
 
@@ -244,7 +244,7 @@ deliverable (prompts, model choices, plugins) lives in
 1. **Route template captured at match time, not at finish.** First pass
    captured `${req.baseUrl}${req.route?.path}` inside the
    `res.on('finish')` metrics callback. That works for the happy path
-   but fails for error responses — by the time the app-level error
+   but fails for error responses - by the time the app-level error
    middleware fires, Express has popped `req.baseUrl` back to `""`, so
    the metric label became just `/` instead of `/api/payment/`. Caught
    it from looking at the actual `/metrics` output: `route="/"` for
@@ -262,7 +262,7 @@ deliverable (prompts, model choices, plugins) lives in
    already declares `service` as an object (`service.name`,
    `service.version`, …) so every log line was rejected with
    `object mapping for [service] tried to parse field [service] as
-   object`. Caught it by curl'ing a sample doc directly — the error
+   object`. Caught it by curl'ing a sample doc directly - the error
    was crystal clear once I bypassed Filebeat. Switched the pino base
    to `{ service: { name: 'backend' } }` and renamed the `time` field
    to `@timestamp` so it doesn't double up with Filebeat's. Then
@@ -273,7 +273,7 @@ deliverable (prompts, model choices, plugins) lives in
 
 4. **Filebeat autodiscover by container name, not label hints.** First
    pass used `co.elastic.logs/enabled=true` labels with the hints
-   provider. Filebeat saw the container but never opened the file —
+   provider. Filebeat saw the container but never opened the file -
    the label-key sanitization rules between Filebeat 7.x and 8.x are
    sufficiently fiddly that I gave up and used
    `equals: { docker.container.name: shop-backend }` instead. More
@@ -295,7 +295,7 @@ deliverable (prompts, model choices, plugins) lives in
    and the model wastes context if you dump a 60 KB ES response.
    Capped at ~6 KB and marked `truncated:true` in the transcript. The
    model sometimes re-queries with a smaller `size` after seeing the
-   marker — exactly the right behavior.
+   marker - exactly the right behavior.
 
 8. **`/metrics` route exclusion in dashboards.** Without filtering out
    `route="/metrics"` and `route="unmatched"`, the RPS panel is
@@ -321,12 +321,12 @@ deliverable (prompts, model choices, plugins) lives in
 
 | Method | Path | Auth | Description |
 |---|---|---|---|
-| POST | /api/auth/signup | — | Create account, returns token |
-| POST | /api/auth/login | — | Login, returns token |
+| POST | /api/auth/signup | - | Create account, returns token |
+| POST | /api/auth/login | - | Login, returns token |
 | POST | /api/auth/logout | session | Invalidate session |
-| GET | /api/products | — | List products (`?search=&category=&sort=`) |
-| GET | /api/products/:id | — | Get single product |
-| GET | /api/products/:id/related | — | "Customers also bought" (intentionally slow self-join) |
+| GET | /api/products | - | List products (`?search=&category=&sort=`) |
+| GET | /api/products/:id | - | Get single product |
+| GET | /api/products/:id/related | - | "Customers also bought" (intentionally slow self-join) |
 | GET | /api/cart | session | Get current cart |
 | POST | /api/cart/items | session | Add item to cart |
 | DELETE | /api/cart/items/:productId | session | Remove from cart |
@@ -335,8 +335,8 @@ deliverable (prompts, model choices, plugins) lives in
 | POST | /api/payment | session | Pay an order (mock provider) |
 | GET | /api/orders | session | List user's orders |
 | GET | /api/orders/:orderId | session | Order detail with items |
-| GET | /healthz | — | Health check |
-| GET | /metrics | — | Prometheus scrape endpoint |
+| GET | /healthz | - | Health check |
+| GET | /metrics | - | Prometheus scrape endpoint |
 
 ---
 
@@ -346,7 +346,7 @@ deliverable (prompts, model choices, plugins) lives in
 .
 ├── docker-compose.yml
 ├── .env.example
-├── README.md                           # this file — run, dashboards, sample run, fixes
+├── README.md                           # this file - run, dashboards, sample run, fixes
 ├── AI_LOG.md                           # prompts, models, plugins, prompt iteration
 ├── backend/                            # instrumented Express app
 │   └── src/observability/              # logger, metrics, middleware
@@ -386,14 +386,14 @@ deliverable (prompts, model choices, plugins) lives in
 ## Original (uninstrumented) starter notes
 
 The intentional behaviors the starter calls out are now exposed as
-first-class signals — see `blueprint/catalog.md` for what each one
+first-class signals - see `blueprint/catalog.md` for what each one
 looks like under load and what a change implies:
 
-- `GET /api/products/:id/related` — unindexed self-join, surfaced as
+- `GET /api/products/:id/related` - unindexed self-join, surfaced as
   `db_query_duration_seconds{query="products_related"}`.
-- `LIKE '%...%'` search — surfaced as
+- `LIKE '%...%'` search - surfaced as
   `db_query_duration_seconds{query="products_search"}`.
-- Mock payment provider 120-450ms latency + ~8% failure rate — surfaced
+- Mock payment provider 120-450ms latency + ~8% failure rate - surfaced
   as `payment_duration_seconds` and `payment_attempts_total`.
-- Closed-enum error codes — surfaced as
+- Closed-enum error codes - surfaced as
   `http_requests_total{error_code=...}` and `error_code` in logs.
