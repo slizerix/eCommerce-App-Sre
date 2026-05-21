@@ -1,0 +1,166 @@
+services:
+  mysql:
+    image: mysql:8.4
+    container_name: shop-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpass
+      MYSQL_DATABASE: shop
+      MYSQL_USER: shop
+      MYSQL_PASSWORD: shoppass
+    volumes:
+      - mysql-data:/var/lib/mysql
+    ports:
+      - "3306:3306"
+    networks: [shop]
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "shop", "-pshoppass"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  backend:
+    build: ./backend
+    container_name: shop-backend
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      PORT: 4000
+      JWT_SECRET: dev-secret-change-me
+      MYSQL_HOST: mysql
+      MYSQL_PORT: 3306
+      MYSQL_USER: shop
+      MYSQL_PASSWORD: shoppass
+      MYSQL_DATABASE: shop
+      # Tune to make failures common enough to spot on the dashboard immediately.
+      PAYMENT_FAILURE_RATE: "${PAYMENT_FAILURE_RATE:-0.08}"
+      LOG_LEVEL: info
+    ports:
+      - "4000:4000"
+    networks: [shop]
+    labels:
+      # Filebeat uses this label to know which containers it should tail and
+      # which parser to apply.
+      co.elastic.logs/enabled: "true"
+      co.elastic.logs/json.keys_under_root: "true"
+      co.elastic.logs/json.add_error_key: "true"
+
+  frontend:
+    build: ./frontend
+    container_name: shop-frontend
+    depends_on: [backend]
+    ports:
+      - "5173:5173"
+    networks: [shop]
+
+  prometheus:
+    image: prom/prometheus:v2.55.0
+    container_name: shop-prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.retention.time=6h"
+    volumes:
+      - ./observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prom-data:/prometheus
+    ports:
+      - "9090:9090"
+    networks: [shop]
+    depends_on: [backend]
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.15.3
+    container_name: shop-elasticsearch
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "false"
+      ES_JAVA_OPTS: "-Xms512m -Xmx512m"
+    ports:
+      - "9200:9200"
+    volumes:
+      - es-data:/usr/share/elasticsearch/data
+    networks: [shop]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:9200/_cluster/health | grep -E '\"status\":\"(green|yellow)\"'"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  filebeat:
+    image: docker.elastic.co/beats/filebeat:8.15.3
+    container_name: shop-filebeat
+    user: root
+    command: ["filebeat", "-e", "-strict.perms=false"]
+    volumes:
+      - ./observability/filebeat/filebeat.yml:/usr/share/filebeat/filebeat.yml:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - filebeat-data:/usr/share/filebeat/data
+    networks: [shop]
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+
+  grafana:
+    image: grafana/grafana:11.3.0
+    container_name: shop-grafana
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_USERS_DEFAULT_THEME: dark
+      GF_INSTALL_PLUGINS: ""
+    volumes:
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "3000:3000"
+    networks: [shop]
+    depends_on: [prometheus, elasticsearch]
+
+  ai-service:
+    build: ./ai-service
+    container_name: shop-ai
+    environment:
+      PORT: 8088
+      OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
+      OPENAI_MODEL: "${OPENAI_MODEL:-gpt-4o-mini}"
+      PROMETHEUS_URL: http://prometheus:9090
+      ELASTICSEARCH_URL: http://elasticsearch:9200
+      LOG_INDEX_PATTERN: "shop-logs-*"
+      MAX_TOOL_ITERATIONS: "8"
+      BLUEPRINT_DIR: /blueprint
+    volumes:
+      # Mount the blueprint read-only so the catalog/guidelines the LLM reads
+      # are always exactly what's checked in. Editing a file is enough — no
+      # rebuild needed.
+      - ./blueprint:/blueprint:ro
+    ports:
+      - "8088:8088"
+    networks: [shop]
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+
+  loadgen:
+    build: ./loadgen
+    container_name: shop-loadgen
+    environment:
+      BACKEND_URL: http://backend:4000
+      RPS: "${LOADGEN_RPS:-3}"
+      ENABLED: "${LOADGEN_ENABLED:-1}"
+    networks: [shop]
+    depends_on: [backend]
+    restart: unless-stopped
+
+volumes:
+  mysql-data:
+  prom-data:
+  es-data:
+  filebeat-data:
+  grafana-data:
+
+networks:
+  shop:
+    driver: bridge

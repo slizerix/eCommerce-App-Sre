@@ -1,0 +1,6 @@
+node_modules
+*.log
+.env
+.DS_Store
+ai-service/node_modules
+loadgen/node_modules

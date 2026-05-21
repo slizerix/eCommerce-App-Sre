@@ -1,0 +1,112 @@
+{
+  "uid": "shop-system-health",
+  "title": "Shop · System Health",
+  "tags": ["shop", "system"],
+  "schemaVersion": 39,
+  "version": 1,
+  "timezone": "browser",
+  "refresh": "10s",
+  "time": { "from": "now-30m", "to": "now" },
+  "templating": { "list": [] },
+  "annotations": { "list": [] },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "HTTP RPS by route",
+      "description": "Traffic shape per route. Sudden cliffs or spikes here are usually the first place to look when something feels off.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "fieldConfig": { "defaults": { "unit": "reqps" } },
+      "options": { "legend": { "displayMode": "table", "placement": "right", "calcs": ["lastNotNull", "max"] } },
+      "targets": [
+        { "refId": "A", "expr": "sum by (route) (rate(http_requests_total{route!=\"unmatched\",route!=\"/metrics\"}[1m]))", "legendFormat": "{{route}}" }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "HTTP p95 latency by route",
+      "description": "p95 by route over 5m. Cross-reference with RPS: high p95 + low RPS = a slow endpoint nobody's hammering; high p95 + high RPS = active user pain.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "fieldConfig": { "defaults": { "unit": "s" } },
+      "options": { "legend": { "displayMode": "table", "placement": "right", "calcs": ["lastNotNull", "max"] } },
+      "targets": [
+        { "refId": "A", "expr": "histogram_quantile(0.95, sum by (le, route) (rate(http_request_duration_seconds_bucket{route!=\"unmatched\",route!=\"/metrics\"}[5m])))", "legendFormat": "{{route}}" }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Error rate by route (4xx + 5xx)",
+      "description": "Per-route ratio of non-2xx responses. 4xx is usually client-driven (bad input, invalid creds); 5xx is yours. Watch the absolute level, not just the trend.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "fieldConfig": { "defaults": { "unit": "percentunit" } },
+      "options": { "legend": { "displayMode": "table", "placement": "right", "calcs": ["lastNotNull"] } },
+      "targets": [
+        { "refId": "A", "expr": "sum by (route) (rate(http_requests_total{status_class=~\"4xx|5xx\",route!=\"unmatched\",route!=\"/metrics\"}[5m])) / clamp_min(sum by (route) (rate(http_requests_total{route!=\"unmatched\",route!=\"/metrics\"}[5m])), 0.0001)", "legendFormat": "{{route}}" }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "table",
+      "title": "Top error codes (5m)",
+      "description": "Closed-enum error codes ranked by frequency. Each is a separate runbook entry in the metric catalog.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "targets": [
+        { "refId": "A", "expr": "topk(10, sum by (error_code, route) (increase(http_requests_total{error_code!=\"\"}[5m])))", "format": "table", "instant": true }
+      ],
+      "transformations": [
+        { "id": "organize", "options": { "excludeByName": { "Time": true, "__name__": true, "job": true, "instance": true, "service": true, "method": true, "status_class": true } } }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "DB query p95 by named query",
+      "description": "Only intentionally-timed queries appear here. `products_related` (the self-join) and `products_search` (LIKE '%...%') are the two that degrade with row count.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+      "fieldConfig": { "defaults": { "unit": "s" } },
+      "options": { "legend": { "displayMode": "table", "placement": "right", "calcs": ["lastNotNull", "max"] } },
+      "targets": [
+        { "refId": "A", "expr": "histogram_quantile(0.95, sum by (le, query) (rate(db_query_duration_seconds_bucket[5m])))", "legendFormat": "{{query}}" }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Process: event loop lag + RSS",
+      "description": "Default prom-client process metrics. Event loop lag above ~50ms sustained means we're CPU-bound or doing too much sync work.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+      "fieldConfig": { "defaults": { "custom": { "axisPlacement": "auto" } } },
+      "options": { "legend": { "displayMode": "table", "placement": "right", "calcs": ["lastNotNull"] } },
+      "targets": [
+        { "refId": "A", "expr": "nodejs_eventloop_lag_p99_seconds", "legendFormat": "evt loop p99 (s)" },
+        { "refId": "B", "expr": "process_resident_memory_bytes / 1024 / 1024", "legendFormat": "RSS (MiB)" }
+      ]
+    },
+    {
+      "id": 7,
+      "type": "logs",
+      "title": "Recent backend errors (Elasticsearch)",
+      "description": "JSON log lines from the backend filtered to warn/error. Pivot from a Prom spike to its log lines via this panel.",
+      "datasource": { "type": "elasticsearch", "uid": "elasticsearch" },
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 24 },
+      "options": { "showTime": true, "wrapLogMessage": true, "enableLogDetails": true, "dedupStrategy": "none", "sortOrder": "Descending" },
+      "targets": [
+        {
+          "refId": "A",
+          "query": "service.name:backend AND level:(warn OR error)",
+          "metrics": [{ "id": "1", "type": "logs", "settings": { "limit": "100" } }],
+          "bucketAggs": [{ "id": "2", "type": "date_histogram", "settings": { "interval": "auto" }, "field": "@timestamp" }],
+          "timeField": "@timestamp"
+        }
+      ]
+    }
+  ]
+}

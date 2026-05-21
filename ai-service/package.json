@@ -1,0 +1,26 @@
+{
+  "name": "shop-ai-service",
+  "version": "1.0.0",
+  "description": "LLM-driven observability investigator. Multi-turn tool-calling loop over Prometheus + Elasticsearch.",
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "dev": "tsx watch src/index.ts",
+    "cli": "tsx src/cli.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "express": "^4.21.0",
+    "openai": "^4.67.3"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/node": "^20.16.10",
+    "tsx": "^4.19.1",
+    "typescript": "^5.6.2"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
