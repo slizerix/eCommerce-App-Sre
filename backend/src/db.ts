@@ -1,6 +1,9 @@
 import mysql from 'mysql2/promise';
 import type { PoolConnection } from 'mysql2/promise';
 import { config } from './config.js';
+import { dbPoolConnections } from './observability/metrics.js';
+
+const CONNECTION_LIMIT = 10;
 
 export const pool = mysql.createPool({
   host: config.mysql.host,
@@ -9,8 +12,32 @@ export const pool = mysql.createPool({
   password: config.mysql.password,
   database: config.mysql.database,
   waitForConnections: true,
-  connectionLimit: 10,
+  connectionLimit: CONNECTION_LIMIT,
 });
+
+// mysql2 doesn't expose pool stats via a public API, but the underlying
+// connection arrays are stable across the 3.x line. Sample every 1s into
+// the dbPoolConnections gauge — cheap and gives us pool saturation visibility.
+// `_allConnections` includes both free and acquired; subtract free to get
+// "in flight" work.
+interface MysqlInternalPool {
+  _allConnections?: { length: number };
+  _freeConnections?: { length: number };
+  _connectionQueue?: { length: number };
+}
+const internalPool = (pool as unknown as { pool: MysqlInternalPool }).pool;
+
+dbPoolConnections.set({ state: 'max' }, CONNECTION_LIMIT);
+
+setInterval(() => {
+  const total = internalPool?._allConnections?.length ?? 0;
+  const free = internalPool?._freeConnections?.length ?? 0;
+  const queued = internalPool?._connectionQueue?.length ?? 0;
+  const acquired = Math.max(0, total - free);
+  dbPoolConnections.set({ state: 'acquired' }, acquired);
+  dbPoolConnections.set({ state: 'free' }, free);
+  dbPoolConnections.set({ state: 'queued' }, queued);
+}, 1000).unref();
 
 export async function withTransaction<T>(fn: (conn: PoolConnection) => Promise<T>): Promise<T> {
   const conn = await pool.getConnection();

@@ -67,6 +67,29 @@ services:
     networks: [shop]
     depends_on: [backend]
 
+  mysqld-exporter:
+    image: prom/mysqld-exporter:v0.15.1
+    container_name: shop-mysqld-exporter
+    # Demo creds — using root keeps the setup one-line. In prod you'd create a
+    # dedicated `exporter` user with PROCESS, REPLICATION CLIENT, SELECT, and
+    # SHOW VIEW grants only.
+    environment:
+      MYSQLD_EXPORTER_PASSWORD: rootpass
+    command:
+      - "--mysqld.address=mysql:3306"
+      - "--mysqld.username=root"
+      - "--collect.global_status"
+      - "--collect.global_variables"
+      - "--collect.info_schema.innodb_metrics"
+      - "--collect.info_schema.processlist"
+      - "--collect.info_schema.tables"
+    ports:
+      - "9104:9104"
+    networks: [shop]
+    depends_on:
+      mysql:
+        condition: service_healthy
+
   elasticsearch:
     image: docker.elastic.co/elasticsearch/elasticsearch:8.15.3
     container_name: shop-elasticsearch

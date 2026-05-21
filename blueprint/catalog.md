@@ -77,7 +77,84 @@ context agree, or one of them is wrong.
     bottleneck. Pull example log lines with the matching route to see
     payload patterns.
   - All named queries climbing together → DB-side problem (lock, pool
-    exhaustion, IO). Check process metrics and MySQL itself.
+    exhaustion, IO). Cross-check `db_pool_connections` and the MySQL-side
+    metrics (`mysql_global_status_*`).
+
+### `db_queries_total`
+- **Type:** counter, labels `query`, `result` (`success` | `error`).
+- **Description:** Outcome counter paired with `db_query_duration_seconds`.
+  The histogram only records successful timings; this counter is how you
+  see query-level failure rates.
+- **Normal:** `result=success` dominates. Sporadic `result=error` during
+  schema migrations or transient connection blips is fine.
+- **Implications:**
+  - Sustained `result=error` on a specific query with healthy MySQL-side
+    metrics → application-level issue (bad input, missing index, schema
+    mismatch).
+  - `result=error` spiking together with `mysql_global_status_threads_connected`
+    near `max_connections` → MySQL refusing connections; we're saturating
+    the server, not the pool.
+
+### `db_pool_connections`
+- **Type:** gauge, label `state`
+  (`acquired` | `free` | `queued` | `max`).
+- **Description:** mysql2 pool saturation, sampled every 1s from the pool's
+  internal arrays. `max` is the static ceiling (10), exposed so panels can
+  show a reference line without templating.
+- **Normal:** `acquired` ≤ 3 under steady ~3 RPS load; `free` makes up the
+  rest; `queued` stays at 0. The total `acquired + free` grows lazily up to
+  `max` as concurrent demand spikes.
+- **Implications:**
+  - `queued > 0` sustained → the app is waiting for connections. Adding more
+    app workers won't help; either widen the pool, shorten queries, or
+    accept the bottleneck. This is the most actionable DB-side signal.
+  - `acquired` pinned at `max` with `queued` rising → classic pool
+    exhaustion. Pair with `db_query_duration_seconds` p95 to see if it's
+    long queries holding connections.
+
+---
+
+## MySQL server (from mysqld-exporter)
+
+Scraped from a `prom/mysqld-exporter` sidecar talking to MySQL on port 3306.
+Gives the "from MySQL's perspective" view that the app-side `db_*` metrics
+can't see (other clients, internal threads, the exporter itself).
+
+### `mysql_global_status_queries`
+- **Type:** counter. Use `rate(...[1m])` for QPS.
+- **Description:** Every statement MySQL executed, including those from the
+  exporter and any external `mysql` shell.
+- **Normal:** Our app-side `sum(rate(db_queries_total[1m]))` should be the
+  vast majority. Background load adds ~1-3 QPS from the exporter itself.
+- **Implications:** Mysql QPS climbing while our app-side QPS stays flat →
+  something else is hitting the database (a runaway script, a forgotten
+  shell, a misbehaving cron). Check `mysql_info_schema_processlist_*`.
+
+### `mysql_global_status_threads_connected` / `_threads_running`
+- **Type:** gauges.
+- **Description:** Currently established connections, and the subset
+  actively executing a query right now.
+- **Normal:** `threads_connected` ≈ 12 (10 from our pool when full +
+  exporter + a couple of admin). `threads_running` near 0 most of the time.
+- **Implications:** `threads_connected` climbing past 12 → another client.
+  `threads_running` sustained above ~3 → long-running queries piling up;
+  cross-check `db_query_duration_seconds` and the processlist.
+
+### `mysql_global_variables_max_connections`
+- **Type:** gauge (constant, exposed for ratios).
+- **Description:** MySQL's hard ceiling. Default 151 in MySQL 8.4.
+- **Implications:** If we ever approach this we have a leak — our pool
+  capping at 10 should make it impossible under correct operation.
+
+### InnoDB buffer pool: hit rate
+- **Expression:**
+  `1 - rate(mysql_global_status_innodb_buffer_pool_reads[5m]) /
+       rate(mysql_global_status_innodb_buffer_pool_read_requests[5m])`
+- **Description:** Fraction of InnoDB reads served from memory rather than
+  hitting disk. A demo with a small hot dataset should sit at >99%.
+- **Implications:** A persistent dip below ~95% means working set has
+  outgrown the buffer pool. Either reduce dataset, increase
+  `innodb_buffer_pool_size`, or accept disk-bound reads.
 
 ---
 

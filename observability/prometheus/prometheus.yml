@@ -16,3 +16,12 @@ scrape_configs:
   - job_name: prometheus
     static_configs:
       - targets: ["localhost:9090"]
+
+  # MySQL-side metrics from the official mysqld-exporter. Gives us QPS,
+  # connections, buffer pool, slow queries, InnoDB row ops — the "from MySQL's
+  # perspective" view that the app-side db_query_* metrics can't see.
+  - job_name: mysql
+    static_configs:
+      - targets: ["mysqld-exporter:9104"]
+        labels:
+          service: mysql

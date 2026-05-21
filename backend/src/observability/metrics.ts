@@ -1,5 +1,6 @@
 import {
   Counter,
+  Gauge,
   Histogram,
   Registry,
   collectDefaultMetrics,
@@ -50,6 +51,30 @@ export const dbQueryDuration = new Histogram({
   help: 'Duration of named database queries in seconds.',
   labelNames: ['query'] as const,
   buckets: [0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2, 5],
+  registers: [registry],
+});
+
+// Counter for named queries by outcome. Lets us compute query-level error
+// rates without the histogram (which only tracks successful timings).
+// `result` is a closed enum: `success` | `error`.
+export const dbQueriesTotal = new Counter({
+  name: 'db_queries_total',
+  help: 'Named DB queries by result.',
+  labelNames: ['query', 'result'] as const,
+  registers: [registry],
+});
+
+// Pool saturation gauges. `state` is a closed enum:
+//   - `acquired`: connections currently checked out and doing work
+//   - `free`:     connections sitting idle in the pool
+//   - `queued`:   callers waiting for a connection (pool exhausted)
+//   - `max`:      configured pool ceiling (constant, exposed for ratios)
+// Sampled every 1s by db.ts. Together they tell us whether we're DB-bound
+// from our side (queued > 0 sustained) before MySQL itself complains.
+export const dbPoolConnections = new Gauge({
+  name: 'db_pool_connections',
+  help: 'MySQL connection pool saturation, broken down by state.',
+  labelNames: ['state'] as const,
   registers: [registry],
 });
 
@@ -151,14 +176,20 @@ export function normalizeErrorCode(code: string | undefined): string {
   return KNOWN_ERROR_CODES.has(code) ? code : 'unknown';
 }
 
-// Times a DB query and records into the histogram. Use sparingly — only on
-// the queries you actually want a panel for. Random one-off queries should
-// stay unlabeled.
+// Times a DB query, records into the duration histogram, and increments the
+// queries_total counter with the outcome. Use sparingly — only on the queries
+// you actually want a panel for. Random one-off queries should stay
+// unlabeled.
 export async function timeDbQuery<T>(name: string, fn: () => Promise<T>): Promise<T> {
   const end = dbQueryDuration.startTimer({ query: name });
+  let result: 'success' | 'error' = 'success';
   try {
     return await fn();
+  } catch (err) {
+    result = 'error';
+    throw err;
   } finally {
     end();
+    dbQueriesTotal.inc({ query: name, result });
   }
 }

@@ -91,12 +91,95 @@
       ]
     },
     {
+      "id": 8,
+      "type": "row",
+      "title": "DB load",
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 24 },
+      "panels": []
+    },
+    {
+      "id": 9,
+      "type": "timeseries",
+      "title": "MySQL pool saturation (app-side)",
+      "description": "Connections checked out vs idle vs queued. Pool ceiling is `max`. Sustained `queued > 0` means we're DB-bound from our side — adding more app workers won't help, the bottleneck is MySQL or query latency.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 25 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": { "drawStyle": "line", "fillOpacity": 20, "stacking": { "mode": "none" } }
+        },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "max" }, "properties": [{ "id": "custom.lineStyle", "value": { "dash": [10, 10], "fill": "dash" } }, { "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } }] }
+        ]
+      },
+      "options": { "legend": { "displayMode": "table", "placement": "right", "calcs": ["lastNotNull", "max"] } },
+      "targets": [
+        { "refId": "A", "expr": "db_pool_connections", "legendFormat": "{{state}}" }
+      ]
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "DB queries per second by query × result",
+      "description": "App-side query rate, split by success and error. A spike in `result=error` without an HTTP error spike means the failure is being swallowed somewhere. Use it together with the latency panel above to spot saturation vs. failure.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 25 },
+      "fieldConfig": { "defaults": { "unit": "ops" } },
+      "options": { "legend": { "displayMode": "table", "placement": "right", "calcs": ["lastNotNull", "max"] } },
+      "targets": [
+        { "refId": "A", "expr": "sum by (query, result) (rate(db_queries_total[1m]))", "legendFormat": "{{query}} · {{result}}" }
+      ]
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "MySQL QPS (server-side)",
+      "description": "Queries per second from MySQL's own counter — includes everything, not just our named queries. If this climbs without our app-side query rate climbing, something else is hitting the database (a runaway script, a backup, the exporter itself).",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 33 },
+      "fieldConfig": { "defaults": { "unit": "qps" } },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
+      "targets": [
+        { "refId": "A", "expr": "rate(mysql_global_status_queries[1m])", "legendFormat": "mysql qps" }
+      ]
+    },
+    {
+      "id": 12,
+      "type": "timeseries",
+      "title": "MySQL connections (server-side)",
+      "description": "Connected threads vs the server's configured `max_connections`. Our app-side pool is limited to 10 connections, so we should never see `threads_connected` above ~12 (one per backend pool + exporter + a few admin connections).",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 33 },
+      "fieldConfig": { "defaults": { "unit": "short" } },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
+      "targets": [
+        { "refId": "A", "expr": "mysql_global_status_threads_connected", "legendFormat": "connected" },
+        { "refId": "B", "expr": "mysql_global_status_threads_running",   "legendFormat": "running" },
+        { "refId": "C", "expr": "mysql_global_variables_max_connections", "legendFormat": "max" }
+      ]
+    },
+    {
+      "id": 13,
+      "type": "timeseries",
+      "title": "InnoDB buffer pool hit rate",
+      "description": "Fraction of InnoDB reads served from memory rather than disk. A healthy demo with a hot dataset should stay above 99%. A persistent dip means working set has outgrown the buffer pool — either reduce data, add memory, or accept disk-bound reads.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 33 },
+      "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1 } },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
+      "targets": [
+        { "refId": "A", "expr": "1 - (rate(mysql_global_status_innodb_buffer_pool_reads[5m]) / clamp_min(rate(mysql_global_status_innodb_buffer_pool_read_requests[5m]), 1))", "legendFormat": "hit rate" }
+      ]
+    },
+    {
       "id": 7,
       "type": "logs",
       "title": "Recent backend errors (Elasticsearch)",
       "description": "JSON log lines from the backend filtered to warn/error. Pivot from a Prom spike to its log lines via this panel.",
       "datasource": { "type": "elasticsearch", "uid": "elasticsearch" },
-      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 24 },
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 41 },
       "options": { "showTime": true, "wrapLogMessage": true, "enableLogDetails": true, "dedupStrategy": "none", "sortOrder": "Descending" },
       "targets": [
         {
